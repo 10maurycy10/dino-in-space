@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define UISTATE_START 0
+#define UISTATE_GAME 0
 #define UISTATE_MENU 1
-#define UISTATE_HIGHSCORE 2
+#define UISTATE_GAMEOVER 2
 
 #define SCREEN_LEN 32
 #define SCREEN_HIGHT 4
@@ -16,6 +16,10 @@
 #define SHIP_FULL "►"
 #define AMMO "◆"
 #define ROCK "□"
+
+#define KEYCODE_FIRE 65
+#define KEYCODE_UP 25
+#define KEYCODE_DOWN 39
 
 unsigned int rng = 539772580;
 int ui_state;
@@ -28,20 +32,25 @@ int ship_pos;
 int has_fired;
 // flag whenter the player has moved since asteriod move
 int has_moved;
+int game_over_ctr;
+int points;
 
 // row major grid
 int asteroids[SCREEN_HIGHT*SCREEN_LEN];
 int asteroid_counters[SCREEN_HIGHT];
 
+int ammo;
+
 #define ASTEROIDS_AIR 0
 #define ASTEROIDS_AMMO 1
 #define ASTEROIDS_ROCK 2
 
-// a simple and crapy prngs
+// a simple and crapy prng
 unsigned int rng_extract() {
     rng += 142;
     rng /= 95;
     rng *= rng;
+    rng %= 1002583;
     return rng;
 }
 
@@ -79,23 +88,31 @@ void advance_asteroids() {
             if (asteroid_counters[y])
                 asteroid_counters[y]--;
             else {
-                asteroids[aidx(SCREEN_LEN-1,y)] = ASTEROIDS_ROCK;
+                if ((rng_extract() % 6) == 0) {
+                    asteroids[aidx(SCREEN_LEN-1,y)] = ASTEROIDS_AMMO;
+                } else {
+                    asteroids[aidx(SCREEN_LEN-1,y)] = ASTEROIDS_ROCK;
+                }
                 asteroid_counters[y] = rng_extract() % 10 + 3;
             }
     }
 }
 
-void run(int s, Window w, Display* d) {    
-    ui_state = UISTATE_START;
+void startgame() {
+    ui_state = UISTATE_GAME;
     framectr = 0;
     ship_pos = 0;
+    ammo = 1;
+    points = 0;
     
     for (int i = 0; i < SCREEN_HIGHT*SCREEN_LEN; i++)
         asteroids[i] = ASTEROIDS_AIR;
     for (int i = 0; i < SCREEN_HIGHT; i++) {
         asteroid_counters[i] = (i*3)%5;
-    }
-    
+    }    
+}
+
+void run(int s, Window w, Display* d) {    
     // load the system default monospace font
     XftFont* font = XftFontOpen(d,0,XFT_FAMILY, XftTypeString, "monospace",XFT_SIZE, XftTypeDouble, 12.0,NULL);
     XftDraw* xft_context = XftDrawCreate(d,w,DefaultVisual(d,0),DefaultColormap(d,0));
@@ -119,6 +136,9 @@ void run(int s, Window w, Display* d) {
     char_width = glyphinfo.xOff;
     char_hight = font->ascent + font->descent;
         
+    // initalize the game vars
+    ui_state = UISTATE_MENU;
+    
     while (1) {
         // Read inputs
         XEvent e;
@@ -130,26 +150,42 @@ void run(int s, Window w, Display* d) {
                 rng_seed(framectr);
                 // prosses input
                 XKeyEvent key = e.xkey;
-                if (25==key.keycode && !has_moved) {
-                    has_moved = 1;
-                    ship_pos--;
-                    if (asteroids[aidx(0, ship_pos)] == ASTEROIDS_ROCK)
-                        ship_pos++;
-                    if (ship_pos < 0) {
-                        ship_pos = 0;
-                    }
-                }
-                if (39==key.keycode && !has_moved) {
-                    has_moved = 1;
-                    ship_pos ++;
-                    if (asteroids[aidx(0, ship_pos)] == ASTEROIDS_ROCK)
+                if (UISTATE_GAME==ui_state) {
+                    if (KEYCODE_UP==key.keycode && !has_moved) {
+                        has_moved = 1;
                         ship_pos--;
-                    if (ship_pos==4) {
-                        ship_pos = 3;
+                        if (asteroids[aidx(0, ship_pos)] == ASTEROIDS_ROCK)
+                            ship_pos++;
+                        if (ship_pos < 0) {
+                            ship_pos = 0;
+                        }
+                    }
+                    if (KEYCODE_DOWN==key.keycode && !has_moved) {
+                        has_moved = 1;
+                        ship_pos ++;
+                        if (asteroids[aidx(0, ship_pos)] == ASTEROIDS_ROCK)
+                            ship_pos--;
+                        if (ship_pos==4) {
+                            ship_pos = 3;
+                        }
+                    }
+                    if (KEYCODE_FIRE==key.keycode) {
+                        if (ammo > 0) {
+                            has_fired = 1;
+                            // reset ammo counter to 0
+                            ammo = 0;
+                        }
                     }
                 }
-                if (65==key.keycode) {
-                    has_fired = 1;
+                // if game menu ish shown
+                if (UISTATE_MENU==ui_state) {
+                     if (KEYCODE_FIRE==key.keycode) {
+                         startgame();
+                     }
+                }
+                // If the game is over, dont take input
+                if (UISTATE_GAMEOVER==ui_state) {
+                    ;
                 }
             }
             if (e.type == DestroyNotify) {
@@ -158,7 +194,7 @@ void run(int s, Window w, Display* d) {
         }
         
         // advance asterids if the frame is divisable by 55
-        if (framectr%4 == 0) {
+        if (framectr%3 == 0) {
             advance_asteroids();
             has_moved = 0;
         }
@@ -167,39 +203,71 @@ void run(int s, Window w, Display* d) {
         // drawing code ...
         XClearWindow(d,w);
         // draw title and boaders
-        drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 2,"XDino in space! version 0.1");
-        drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 1,"################################");
-        drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET + SCREEN_HIGHT,"################################");
+        drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 3,"XDino in space! version 0.1");
+        if (UISTATE_MENU==ui_state) {
+            drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 1,"Press [SPACE] to start game");
+        }
+        if (UISTATE_GAMEOVER==ui_state) {
+            drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 1,"GAME OVER!!!!");
+            if (game_over_ctr == 0)
+                ui_state = UISTATE_MENU;
+            game_over_ctr --;
+            
+        }
+        // if game is started...
+        if (UISTATE_GAME==ui_state) {
+            // draw borders
+            drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 1,"################################");
+            drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET + SCREEN_HIGHT,"################################");
         
-        // draw ship
-        drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET+ship_pos,SHIP_EMPTY);
-        //drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET+ship_pos,SHIP_FULL);
-        
-        // draw asteriod feild
-        for (int y = 0; y < SCREEN_HIGHT; y++)
-            for (int x = 0; x < SCREEN_LEN; x++) {
-                if (asteroids[aidx(x, y)] == ASTEROIDS_AMMO)
-                    drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET + y,AMMO);
-                if (asteroids[aidx(x, y)] == ASTEROIDS_ROCK)
-                    drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET + y,ROCK);
-            }
-        
-        // draw line and destroy asteroid
-        if (has_fired)
-            for (int x = 0; x < SCREEN_LEN; x++) {
-                if (x < (SCREEN_LEN - 1)) {
-                    if (asteroids[aidx(x+1,ship_pos)]) {
-                        drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET+ship_pos,"-");
-                        asteroids[aidx(x+1,ship_pos)] = ASTEROIDS_AIR;
-                        break;
-                    }
+            // draw points
+            char str[64];
+            snprintf(str, 64, "points: %d", points);
+            drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET + SCREEN_HIGHT + 1,str);
+
+            
+            // draw ship
+            if (ammo == 0)
+                drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET+ship_pos,SHIP_EMPTY);
+            else
+                drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET+ship_pos,SHIP_FULL);
+         
+            // draw asteriod feild
+            for (int y = 0; y < SCREEN_HIGHT; y++)
+                for (int x = 0; x < SCREEN_LEN; x++) {
+                    if (asteroids[aidx(x, y)] == ASTEROIDS_AMMO)
+                        drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET + y,AMMO);
+                    if (asteroids[aidx(x, y)] == ASTEROIDS_ROCK)
+                        drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET + y,ROCK);
                 }
-                drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET+ship_pos,"-");
-            }
+    
+            // draw line and destroy asteroid
+            if (has_fired)
+                for (int x = 0; x < SCREEN_LEN; x++) {
+                    if (x < (SCREEN_LEN - 1)) {
+                        if (asteroids[aidx(x+1,ship_pos)]) {
+                            drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET+ship_pos,"-");
+                            asteroids[aidx(x+1,ship_pos)] = ASTEROIDS_AIR;
+                            points += 5;
+                            break;
+                        }
+                    }
+                    drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET+ship_pos,"-");
+                }
+        }
         XFlush(d);
         
-        if (asteroids[aidx(0,ship_pos)]) {
-            return;
+        if (UISTATE_GAME==ui_state) {
+            if (asteroids[aidx(0,ship_pos)] == ASTEROIDS_ROCK) {
+                ui_state = UISTATE_GAMEOVER;
+                game_over_ctr = 10;
+            }
+        
+            if (asteroids[aidx(0,ship_pos)] == ASTEROIDS_AMMO) {
+                asteroids[aidx(0,ship_pos)] = ASTEROIDS_AIR;
+                ammo++;
+                points++;
+            }
         }
         
         usleep(100*1000);
