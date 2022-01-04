@@ -7,6 +7,7 @@
 #define UISTATE_GAME 0
 #define UISTATE_MENU 1
 #define UISTATE_GAMEOVER 2
+#define UISTATE_SELECTNAME 3
 
 #define SCREEN_LEN 32
 #define SCREEN_HIGHT 4
@@ -34,12 +35,27 @@ int has_fired;
 int has_moved;
 int game_over_ctr;
 int points;
-
 // row major grid
 int asteroids[SCREEN_HIGHT*SCREEN_LEN];
 int asteroid_counters[SCREEN_HIGHT];
-
 int ammo;
+int name = 0;
+
+int nametablesize = 5;
+char* nametable[] = {
+    "maurycy",
+    "hugo",
+    "gabi",
+    "mom",
+    "dad",
+};
+
+struct Highscores highscores;
+
+struct Highscores {
+    int scores[4];
+    int names[4];
+};
 
 #define ASTEROIDS_AIR 0
 #define ASTEROIDS_AMMO 1
@@ -48,9 +64,8 @@ int ammo;
 // a simple and crapy prng
 unsigned int rng_extract() {
     rng += 142;
-    rng /= 95;
     rng *= rng;
-    rng %= 1002583;
+    rng %= 1578313;
     return rng;
 }
 
@@ -73,6 +88,40 @@ void drawstring(XftDraw* xftdraw, XftColor color, XftFont* font, int x, int y, c
         x * char_width,
         y * char_hight + char_hight,
         msg);
+}
+
+// returns the malloc-ed name and copys the score in  
+struct Highscores read_high_score() {
+    struct Highscores scores;
+    
+    FILE* scorefile = fopen(".xdinoscores","r");
+    if (!scorefile) {
+        scores.scores[0] = 0;
+        scores.scores[1] = 0;
+        scores.scores[2] = 0;
+        scores.scores[3] = 0;
+        scores.names[0] = -1;
+        scores.names[1] = -1;
+        scores.names[2] = -1;
+        scores.names[3] = -1;
+    } else
+        fread(&scores,sizeof(struct Highscores),1,scorefile);
+    return scores;
+}
+
+// -1 if not score, pos in leaderboard if it is
+int ishighscore(int score) {
+    int pos = -1;
+    for (int i = 3; i != -1; i--)
+        if (highscores.scores[i] < score)
+            pos = i;
+    return pos;
+}
+
+void record_high_score() {
+    FILE* scorefile = fopen(".xdinoscores","w");
+    fwrite(&highscores, sizeof(struct Highscores), 1, scorefile);
+    fclose(scorefile);
 }
 
 void advance_asteroids() {
@@ -99,6 +148,7 @@ void advance_asteroids() {
 }
 
 void startgame() {
+    highscores = read_high_score();
     ui_state = UISTATE_GAME;
     framectr = 0;
     ship_pos = 0;
@@ -138,6 +188,8 @@ void run(int s, Window w, Display* d) {
         
     // initalize the game vars
     ui_state = UISTATE_MENU;
+    
+    highscores = read_high_score();
     
     while (1) {
         // Read inputs
@@ -187,6 +239,28 @@ void run(int s, Window w, Display* d) {
                 if (UISTATE_GAMEOVER==ui_state) {
                     ;
                 }
+                if (UISTATE_SELECTNAME==ui_state) {
+                    if (KEYCODE_UP==key.keycode) {
+                        name --;
+                    }
+                    if (KEYCODE_DOWN==key.keycode) {
+                        name ++;
+                    }
+                    if (KEYCODE_FIRE==key.keycode) {
+                        printf("%d\n",name);
+                        int newscoreidx = ishighscore(points);
+                         for (int i = 3; i>newscoreidx; i--) {
+                            if (i != 0) {
+                                highscores.names[i] = highscores.names[i - 1];
+                                highscores.scores[i] = highscores.scores[i - 1];
+                            }
+                        }
+                        highscores.names[newscoreidx] = name;
+                        highscores.scores[newscoreidx] = points;
+                        record_high_score();
+                        ui_state = UISTATE_MENU;
+                    }
+                }
             }
             if (e.type == DestroyNotify) {
                 break;
@@ -206,6 +280,15 @@ void run(int s, Window w, Display* d) {
         drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 3,"XDino in space! version 0.1");
         if (UISTATE_MENU==ui_state) {
             drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 1,"Press [SPACE] to start game");
+            
+            // print highscores
+            char str[64];
+            for (int i = 0; i < 4; i++) {
+                if (highscores.names[i] != -1) {
+                    snprintf(str, 64, "HiScore: %d %s", highscores.scores[i], nametable[highscores.names[i]]);
+                    drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET + 2 + i,str);
+                }
+            }
         }
         if (UISTATE_GAMEOVER==ui_state) {
             drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET - 1,"GAME OVER!!!!");
@@ -224,8 +307,7 @@ void run(int s, Window w, Display* d) {
             char str[64];
             snprintf(str, 64, "points: %d", points);
             drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET + SCREEN_HIGHT + 1,str);
-
-            
+        
             // draw ship
             if (ammo == 0)
                 drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET+ship_pos,SHIP_EMPTY);
@@ -255,11 +337,23 @@ void run(int s, Window w, Display* d) {
                     drawstring(xftdraw,xftcolor,font,x,DRAW_OFFSET+ship_pos,"-");
                 }
         }
+        if (UISTATE_SELECTNAME==ui_state) {
+            for (int i = 0; i < nametablesize; i++) {
+                drawstring(xftdraw,xftcolor,font,2,DRAW_OFFSET+i,nametable[i]);
+                if (name == i) {
+                    drawstring(xftdraw,xftcolor,font,0,DRAW_OFFSET+i,">");
+                }
+            }
+        }
         XFlush(d);
         
         if (UISTATE_GAME==ui_state) {
             if (asteroids[aidx(0,ship_pos)] == ASTEROIDS_ROCK) {
-                ui_state = UISTATE_GAMEOVER;
+                record_high_score(points);
+                if (ishighscore(points) != -1)
+                    ui_state = UISTATE_SELECTNAME;
+                else 
+                    ui_state = UISTATE_GAMEOVER;
                 game_over_ctr = 10;
             }
         
@@ -279,11 +373,11 @@ void run(int s, Window w, Display* d) {
 }
             
 
-int main(void) {
+int main(int argc, char *argv[]) {
     Display *d;
     Window w;
-    int s;
-
+    int s;    
+    
     d = XOpenDisplay(NULL);
     if (d == NULL) {
         fprintf(stderr, "Cannot open display\n");
