@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define UISTATE_GAME 0
 #define UISTATE_MENU 1
@@ -48,15 +49,15 @@ int ammo;
 // a simple and crapy prng
 unsigned int rng_extract() {
     rng += 142;
-    rng /= 95;
-    rng *= rng;
-    rng %= 1002583;
+    rng *= 95;
+    //rng *= rng;
+    //rng %= 1002583;
     return rng;
 }
 
 void rng_seed(int i) {
-    rng *= i;
-    rng += 42;
+//    rng *= i;
+//    rng += 42;
 }
 
 int aidx(int x, int y) {
